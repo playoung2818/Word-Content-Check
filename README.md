@@ -9,6 +9,7 @@ The tool checks today's WO `.docx` files against the Part Info database and the 
 Critical errors are the items that should stop or fix the WO:
 
 - Sales order row count mismatch
+- Sales order item name mismatch
 - Part number mismatch
 - Quantity mismatch
 
@@ -74,6 +75,8 @@ Skip Google Sheet sales-order lookup:
 ```powershell
 python check_today.py --no-sales-order
 ```
+
+When Google Sheet sales-order lookup is enabled, the checker compares both the number of WO item rows and the item names against the Open Sales Order `Item` values. Item order is ignored, so reordering rows will not create a critical error. Missing, extra, or different item names are reported in the critical section.
 
 Override the WO folder:
 
