@@ -21,7 +21,8 @@ WO_FOLDER = Path(os.getenv("WO_FOLDER", r"D:\OneDrive - neousys-tech\Share NTA W
 
 SHEET_NAME = os.getenv("WO_SHEET_NAME", "PDF_WO")
 SALES_ORDER_TAB = os.getenv("WO_SALES_ORDER_TAB", "Open Sales Order")
-RED_BANG = "\033[91m!\033[0m"
+RED_ALERT = "\033[1;97;41m CRITICAL \033[0m"
+YELLOW_ALERT = "\033[1;30;43m CHECK \033[0m"
 
 
 def make_engine(db_url: str | None = None):
@@ -49,10 +50,9 @@ def read_sales_order(
     gc = gspread.service_account(filename=str(google_cred_path))
     ws = gc.open(sheet_name).worksheet(sales_order_tab)
     df = get_as_dataframe(ws, evaluate_formulas=True, dtype=str).dropna(how="all")
-    if "WO_Number" not in df.columns and "WO" in df.columns:
-        df = df.rename(columns={"WO": "WO_Number"})
-    if "WO_Number" in df.columns:
-        df["WO_Number"] = df["WO_Number"].map(clean_text)
+    if "QB Num" not in df.columns:
+        raise ValueError("Expected 'QB Num' column not found in Open Sales Order sheet.")
+    df["QB Num"] = df["QB Num"].map(clean_text)
     return df
 
 
@@ -143,7 +143,7 @@ def extract_product_details(file_path: Path | str) -> list[dict[str, Any]]:
     return rows
 
 
-def sales_order_row_count_result(file_path: Path | str, sales_order: pd.DataFrame | None = None) -> dict[str, Any]:
+def compare_word_file_to_sales_order_result(file_path: Path | str, sales_order: pd.DataFrame | None = None) -> dict[str, Any]:
     word_items = extract_product_details(file_path)
     word_count = len(word_items)
     wo_number = extract_wo_number(file_path)
@@ -231,6 +231,25 @@ def sales_order_row_count_result(file_path: Path | str, sales_order: pd.DataFram
                 "message": f"Item name mismatch: Word and Open Sales Order have different item set ({len(item_mismatches)} difference(s))",
             })
     return result
+
+
+def sales_order_row_count_result(file_path: Path | str, sales_order: pd.DataFrame | None = None) -> dict[str, Any]:
+    return compare_word_file_to_sales_order_result(file_path, sales_order=sales_order)
+
+
+def compare_word_file_to_sales_order(file_path: Path | str, sales_order: pd.DataFrame | None = None) -> str:
+    result = compare_word_file_to_sales_order_result(file_path, sales_order=sales_order)
+    if result["severity"] == "CRITICAL":
+        status = "CRITICAL"
+    elif result["severity"] == "WARNING":
+        status = f"WARNING {result['error_type']}"
+    else:
+        status = "OK"
+    item_mismatch_count = len(result.get("item_mismatches", []))
+    return (
+        f"Status: {status} | Open Sales Order row count: Word {result['word_count']}, "
+        f"Google Sheet {result['sheet_count']} | Item mismatches: {item_mismatch_count}"
+    )
 
 
 def db_part_for_serial(serial_number: str) -> str | None:
@@ -454,7 +473,7 @@ def print_issue_report(
     print(f"Checked WO: {checked_count} | Critical: {len(critical_df)} | Warnings: {len(warning_df)} | WO with critical errors: {files_with_critical} | Clean WO: {clean_count}")
     print()
 
-    print("CRITICAL")
+    print(f"{RED_ALERT} CRITICAL ISSUES {RED_ALERT}")
     if critical_df.empty:
         print("All checked WOs passed critical checks.")
     else:
@@ -464,31 +483,32 @@ def print_issue_report(
 
             row_errors = file_errors[file_errors["error_type"] == "ROW_COUNT_MISMATCH"]
             for _, r in row_errors.iterrows():
-                print(f"   - Row count mismatch: Word {r.get('word_count')} | Open Sales Order {r.get('sheet_count')}")
+                print(f"   - {RED_ALERT} Row count mismatch: Word {r.get('word_count')} | Open Sales Order {r.get('sheet_count')}")
                 for mismatch in r.get("item_mismatches", []) or []:
                     if mismatch.get("mismatch_type") == "MISSING_IN_SHEET":
-                        print(f"     ? Item missing from Open Sales Order x{mismatch.get('count')}: Word {mismatch.get('word_part')}")
+                        print(f"     {YELLOW_ALERT} Missing from Open Sales Order x{mismatch.get('count')}: Word {mismatch.get('word_part')}")
                     else:
-                        print(f"     ? Extra Open Sales Order item x{mismatch.get('count')}: {mismatch.get('sheet_part')}")
+                        print(f"     {YELLOW_ALERT} Extra Open Sales Order item x{mismatch.get('count')}: {mismatch.get('sheet_part')}")
 
             item_errors = file_errors[file_errors["error_type"] == "ITEM_NAME_MISMATCH"]
             for _, r in item_errors.iterrows():
                 for mismatch in r.get("item_mismatches", []) or []:
                     if mismatch.get("mismatch_type") == "MISSING_IN_SHEET":
-                        print(f"   - ? Item missing from Open Sales Order x{mismatch.get('count')}: Word {mismatch.get('word_part')}")
+                        print(f"   - {YELLOW_ALERT} Missing from Open Sales Order x{mismatch.get('count')}: Word {mismatch.get('word_part')}")
                     else:
-                        print(f"   - ? Extra Open Sales Order item x{mismatch.get('count')}: {mismatch.get('sheet_part')}")
+                        print(f"   - {YELLOW_ALERT} Extra Open Sales Order item x{mismatch.get('count')}: {mismatch.get('sheet_part')}")
 
             qty_errors = file_errors[file_errors["error_type"] == "QTY_MISMATCH"]
             for _, r in qty_errors.iterrows():
-                print(f"   - Quantity mismatch: {r.get('word_part')} | Word qty {r.get('word_qty')} | SN count {r.get('serial_count')}")
+                print(f"   - {RED_ALERT} Quantity mismatch: {r.get('word_part')} | Word qty {r.get('word_qty')} | SN count {r.get('serial_count')}")
 
-            part_errors = file_errors[file_errors["error_type"] == "PART_MISMATCH"]
-            for (word_part, db_part), group in part_errors.groupby(["word_part", "db_part"], dropna=False):
-                serials = [str(sn) for sn in group["serial_number"].dropna().tolist() if str(sn)]
-                shown = ", ".join(serials[:6])
-                more = f" (+{len(serials) - 6} more)" if len(serials) > 6 else ""
-                print(f"   - {RED_BANG} Part mismatch x{len(group)}: {shown}{more} | Word {word_part} | DB {db_part}")
+            if {"word_part", "db_part", "serial_number"}.issubset(file_errors.columns):
+                part_errors = file_errors[file_errors["error_type"] == "PART_MISMATCH"]
+                for (word_part, db_part), group in part_errors.groupby(["word_part", "db_part"], dropna=False):
+                    serials = [str(sn) for sn in group["serial_number"].dropna().tolist() if str(sn)]
+                    shown = ", ".join(serials[:6])
+                    more = f" (+{len(serials) - 6} more)" if len(serials) > 6 else ""
+                    print(f"   - {RED_ALERT} Part mismatch x{len(group)}: {shown}{more} | Word {word_part} | DB {db_part}")
         print()
 
     print("WARNINGS")
@@ -534,7 +554,7 @@ def validate_wo_folder(
                 continue
 
             sn_results = validate_word_file(file_path)
-            row_count_result = sales_order_row_count_result(file_path, sales_order=sales_order)
+            row_count_result = compare_word_file_to_sales_order_result(file_path, sales_order=sales_order)
             all_results[file] = {
                 "wo_number": extract_wo_number(file_path),
                 "file_path": file_path,
@@ -542,6 +562,7 @@ def validate_wo_folder(
                 "modified_date": modified_time,
                 "serial_validation": sn_results,
                 "sales_order_row_count": row_count_result,
+                "sales_order_count_check": compare_word_file_to_sales_order(file_path, sales_order=sales_order),
             }
 
             if creation_time != modified_time and modified_time == target_date:
@@ -576,13 +597,14 @@ def validate_single_file(
 ) -> dict[str, Any]:
     file_path = Path(file_path)
     sn_results = validate_word_file(file_path)
-    row_count_result = sales_order_row_count_result(file_path, sales_order=sales_order)
+    row_count_result = compare_word_file_to_sales_order_result(file_path, sales_order=sales_order)
     all_results = {
         file_path.name: {
             "wo_number": extract_wo_number(file_path),
             "file_path": str(file_path),
             "serial_validation": sn_results,
             "sales_order_row_count": row_count_result,
+            "sales_order_count_check": compare_word_file_to_sales_order(file_path, sales_order=sales_order),
         }
     }
     issue_df = report_issue_rows(all_results)
