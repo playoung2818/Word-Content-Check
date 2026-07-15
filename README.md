@@ -30,7 +30,7 @@ Everything else is reported as a warning:
 - `wo_check.py`: reusable checker logic
 - `check_today.py`: CLI entry point for daily use
 
-## Daily CLI Use
+## CLI Functions
 
 From this folder:
 
@@ -69,19 +69,3 @@ Export issue details to CSV:
 ```powershell
 python check_today.py --export-csv report_output
 ```
-
-Skip Google Sheet sales-order lookup:
-
-```powershell
-python check_today.py --no-sales-order
-```
-
-When Google Sheet sales-order lookup is enabled, the checker compares both the number of WO item rows and the item names against the Open Sales Order `Item` values. Item order is ignored, so reordering rows will not create a critical error. Missing, extra, or different item names are reported in the critical section.
-
-Override the WO folder:
-
-```powershell
-python check_today.py --folder "D:\path\to\Work Order 2026-06"
-```
-
-Only files created or modified on the target date are checked when scanning a folder.
