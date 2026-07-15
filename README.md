@@ -12,10 +12,10 @@ Critical errors are the items that should stop or fix the WO:
 - Sales order item name mismatch
 - Part number mismatch
 - Quantity mismatch
+- Serial number not found in receiving log
 
 Everything else is reported as a warning:
 
-- Serial number not found in receiving log
 - No serial numbers listed
 - Missing/unreadable WO table rows
 - Missing sales-order lookup columns
